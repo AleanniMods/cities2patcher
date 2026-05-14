@@ -145,7 +145,8 @@ static class PdxSdkPatcher
             {
                 if (!method.HasBody) continue;
                 var il = method.Body.Instructions;
-                for (int i = 1; i < il.Count; i++)
+                bool bodyReplaced = false;
+                for (int i = 1; i < il.Count && !bodyReplaced; i++)
                 {
                     if (il[i].OpCode != OpCodes.Call && il[i].OpCode != OpCodes.Callvirt) continue;
                     var mr = il[i].Operand as MethodReference;
@@ -153,6 +154,20 @@ static class PdxSdkPatcher
                     if (!dryRun)
                     {
                         var prev = il[i - 1];
+
+                        // Surgical NOP-ing would clobber an early-return `ret` (e.g. the null-check
+                        // branch in ModsDownloadProgressController.get_IsPaused), causing fall-through
+                        // and a stack imbalance the verifier rejects with InvalidProgramException.
+                        // For bool-returning methods in this shape, replace the body wholesale.
+                        if (prev.OpCode == OpCodes.Ret &&
+                            method.ReturnType.MetadataType == MetadataType.Boolean)
+                        {
+                            ReplaceWithReturnFalse(method);
+                            applied++;
+                            bodyReplaced = true;
+                            break;
+                        }
+
                         if (prev.OpCode == OpCodes.Ldflda)
                         {
                             if (i >= 3 && il[i - 2].OpCode == OpCodes.Ldfld) { il[i - 3].OpCode = OpCodes.Nop; il[i - 3].Operand = null; il[i - 2].OpCode = OpCodes.Nop; il[i - 2].Operand = null; }
@@ -257,7 +272,8 @@ static class PdxSdkPatcher
             {
                 if (!method.HasBody) continue;
                 var il = method.Body.Instructions;
-                for (int i = 1; i < il.Count; i++)
+                bool bodyReplaced = false;
+                for (int i = 1; i < il.Count && !bodyReplaced; i++)
                 {
                     if (il[i].OpCode != OpCodes.Call && il[i].OpCode != OpCodes.Callvirt) continue;
                     var mr = il[i].Operand as MethodReference;
@@ -265,6 +281,18 @@ static class PdxSdkPatcher
                     if (!dryRun)
                     {
                         var prev = il[i - 1];
+
+                        // Same safety as FIX 7: surgical NOP of an early-return `ret` would
+                        // cause fall-through. Replace bool-returning bodies wholesale instead.
+                        if (prev.OpCode == OpCodes.Ret &&
+                            method.ReturnType.MetadataType == MetadataType.Boolean)
+                        {
+                            ReplaceWithReturnFalse(method);
+                            applied++;
+                            bodyReplaced = true;
+                            break;
+                        }
+
                         if (prev.OpCode == OpCodes.Ldfld && i >= 3 && il[i - 2].OpCode == OpCodes.Ldfld) { il[i - 3].OpCode = OpCodes.Nop; il[i - 3].Operand = null; il[i - 2].OpCode = OpCodes.Nop; il[i - 2].Operand = null; il[i - 1].OpCode = OpCodes.Nop; il[i - 1].Operand = null; }
                         else if (prev.OpCode == OpCodes.Ldfld && i >= 2) { il[i - 2].OpCode = OpCodes.Nop; il[i - 2].Operand = null; il[i - 1].OpCode = OpCodes.Nop; il[i - 1].Operand = null; }
                         else { il[i - 1].OpCode = OpCodes.Nop; il[i - 1].Operand = null; }
@@ -430,6 +458,16 @@ static class PdxSdkPatcher
 
         module.Dispose();
         return new PatchSummary("PDX.SDK.dll", applied, DryRun: true);
+    }
+
+    static void ReplaceWithReturnFalse(MethodDefinition method)
+    {
+        method.Body.Instructions.Clear();
+        method.Body.ExceptionHandlers.Clear();
+        method.Body.Variables.Clear();
+        var ilp = method.Body.GetILProcessor();
+        ilp.Append(ilp.Create(OpCodes.Ldc_I4_0));
+        ilp.Append(ilp.Create(OpCodes.Ret));
     }
 
     static void ApplyPathExistsBypass(TypeDefinition type, string methodName, int nopBefore, bool dryRun, ref int applied)
