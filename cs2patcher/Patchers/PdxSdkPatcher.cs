@@ -11,9 +11,13 @@
 // FIX 14:   FileAlreadyDownloaded — always return false (prevents lock-acquire on missing file)
 // FIX 15:   GetLockToken — remove Win32 timer-based 10s timeout (fires in milliseconds under Wine)
 // FIX 16:   CreateFileStream MoveNext — dispose reader lock in IOException catch (prevents deadlock)
+// FIX 17:   ListFiles/ListDirectories/ListFilesRecursive — wrap body in try-catch(IOException)
+//           returning empty list (Wine throws IOException: Success for non-existent directories)
 //
-// FIX 15 and 16 are the root-cause fixes discovered on v1.5.8f1 where FIX 7/9/14 alone
+// FIX 15, 16, 17 are the root-cause fixes discovered on v1.5.8f1+ where FIX 7/9/14 alone
 // were insufficient. FIX 14 is kept as a safety net for older versions.
+// FIX 7 and FIX 12 include a wholesale-replace fallback when the surgical NOP approach
+// would clobber an early-return `ret` (see ModsDownloadProgressController.get_IsPaused).
 
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -444,6 +448,31 @@ static class PdxSdkPatcher
             }
         }
 
+        // ---- FIX 17: ListFiles/ListDirectories/ListFilesRecursive — IOException: Success on Wine ----
+        // Wine's Directory.GetFiles/GetDirectories throws IOException with empty/"Success" message
+        // when the directory doesn't exist (instead of returning empty or throwing
+        // DirectoryNotFoundException). The PathExists early-exit guard is useless because Wine's
+        // GetFileAttributes lies. Fix: wrap each method body in try-catch(IOException) returning
+        // an empty list. The existing newobj List<string>::.ctor() reference is reused.
+        foreach (var name in new[] { "ListFiles", "ListDirectories", "ListFilesRecursive" })
+        {
+            var method = diskIO.Methods.FirstOrDefault(m => m.Name == name);
+            if (method?.HasBody != true) continue;
+
+            // Find the existing List<string>::.ctor() ref used by the !PathExists early branch
+            var listCtor = method.Body.Instructions
+                .Where(i => i.OpCode == OpCodes.Newobj)
+                .Select(i => i.Operand as MethodReference)
+                .FirstOrDefault(mr => mr?.Name == ".ctor" && mr.DeclaringType.Name == "List`1");
+            if (listCtor == null) continue;
+
+            // Skip if already wrapped (heuristic: method already has an IOException catch)
+            if (method.Body.ExceptionHandlers.Any(h => h.CatchType?.Name == "IOException")) continue;
+
+            if (!dryRun) WrapBodyReturningListInTryCatch(method, listCtor, ioExceptionRef);
+            applied++;
+        }
+
         if (applied == 0)
         {
             module.Dispose();
@@ -468,6 +497,54 @@ static class PdxSdkPatcher
         var ilp = method.Body.GetILProcessor();
         ilp.Append(ilp.Create(OpCodes.Ldc_I4_0));
         ilp.Append(ilp.Create(OpCodes.Ret));
+    }
+
+    // Wraps the entire body of a List<T>-returning method in try-catch(IOException) that
+    // returns an empty List<T>. All existing `ret` instructions are converted to
+    // `stloc localVar; leave End` (in-place to preserve branch target references).
+    static void WrapBodyReturningListInTryCatch(MethodDefinition method, MethodReference listCtor, TypeReference ioException)
+    {
+        var body = method.Body;
+        var ilp = body.GetILProcessor();
+        var il = body.Instructions;
+
+        var localVar = new VariableDefinition(method.ReturnType);
+        body.Variables.Add(localVar);
+
+        var firstInstr = il[0];
+
+        var endLdloc = ilp.Create(OpCodes.Ldloc, localVar);
+        var endRet = ilp.Create(OpCodes.Ret);
+        var catchPop = ilp.Create(OpCodes.Pop);
+        var catchNewobj = ilp.Create(OpCodes.Newobj, listCtor);
+        var catchStloc = ilp.Create(OpCodes.Stloc, localVar);
+        var catchLeave = ilp.Create(OpCodes.Leave, endLdloc);
+
+        // Convert every existing `ret` into `stloc; leave End`. Mutate in place so that
+        // any branch instructions referencing the old ret keep pointing to the new stloc.
+        foreach (var ret in il.Where(i => i.OpCode == OpCodes.Ret).ToList())
+        {
+            ret.OpCode = OpCodes.Stloc;
+            ret.Operand = localVar;
+            ilp.InsertAfter(ret, ilp.Create(OpCodes.Leave, endLdloc));
+        }
+
+        // Append catch handler IL and the final ldloc/ret
+        ilp.Append(catchPop);
+        ilp.Append(catchNewobj);
+        ilp.Append(catchStloc);
+        ilp.Append(catchLeave);
+        ilp.Append(endLdloc);
+        ilp.Append(endRet);
+
+        body.ExceptionHandlers.Add(new ExceptionHandler(ExceptionHandlerType.Catch)
+        {
+            TryStart = firstInstr,
+            TryEnd = catchPop,
+            HandlerStart = catchPop,
+            HandlerEnd = endLdloc,
+            CatchType = ioException
+        });
     }
 
     static void ApplyPathExistsBypass(TypeDefinition type, string methodName, int nopBefore, bool dryRun, ref int applied)

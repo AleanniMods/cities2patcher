@@ -34,7 +34,7 @@ All patches are applied to .NET assemblies using [Mono.Cecil](https://github.com
 
 ## PDX.SDK.dll — Paradox Mods downloads
 
-`PDX.SDK.dll` is the Paradox mod download SDK. It contains 16 Wine-specific bugs addressed by this patcher. The two root-cause bugs for download hangs are FIX 15 and FIX 16.
+`PDX.SDK.dll` is the Paradox mod download SDK. It contains 17 Wine-specific bugs addressed by this patcher. The root-cause fixes are FIX 15 (download freeze), FIX 16 (subsequent-download deadlock), and FIX 17 (fresh-install IOException). FIX 7 and FIX 12 also include a fallback path that triggers an `InvalidProgramException` if not handled correctly.
 
 ### FIX 1–4: P/Invoke error checks and PathExists lies (DiskIODefaultWindows)
 
@@ -54,6 +54,18 @@ All patches are applied to .NET assemblies using [Mono.Cecil](https://github.com
 ### FIX 7: CancellationToken checks — broad safety net
 
 Every `get_IsCancellationRequested` call in the DLL is replaced with `ldc.i4.0` (always `false`). This prevents any download operation from being cancelled by a spuriously-cancelled token. **Note:** FIX 15 is the targeted root-cause fix; FIX 7 is a belt-and-suspenders safety net for older versions.
+
+**Wholesale-replace fallback (added after a `get_IsPaused` regression):** the surgical NOP approach fails when the instruction preceding `call get_IsCancellationRequested` is itself a `ret` from an earlier branch. `ModsDownloadProgressController.get_IsPaused` has exactly this shape:
+```il
+ldarg.0; ldfld tokenSource; dup; brtrue.s Exists
+pop; ldc.i4.0; ret                 ← null branch returns false here
+Exists:
+call CancellationTokenSource::get_IsCancellationRequested   ← FIX 7 target
+ret
+```
+The "else" branch of FIX 7 (when `prev` isn't `ldflda`) NOPs `il[i-1]`, which here is the early-return `ret`. Execution then falls through into our `ldc.i4.0` push, leaving the stack imbalanced at the final `ret`. Mono's verifier rejects the resulting body with `InvalidProgramException: Invalid IL code in ... get_IsPaused (): IL_000d: ret`.
+
+When the patcher detects `prev.OpCode == Ret` on a `bool`-returning method, it replaces the entire method body with `ldc.i4.0; ret` instead of attempting surgical patching. Same fallback is wired into FIX 12.
 
 ### FIX 8: CreateLongPathFileStream — invalid handle IOException
 
@@ -145,6 +157,71 @@ callvirt AcquireLockResult::Dispose()    // release reader lock
 `AcquireLockResult.Dispose()` is null-safe (checks `_releaseAction != null`) so calling it on a failed/unacquired lock is safe.
 
 **Why this is cleaner than FIX 14:** FIX 14 prevents the code path from running at all (by always returning `false` from `FileAlreadyDownloaded`), which means the file is re-downloaded on every game launch even if it was already downloaded. FIX 16 fixes the actual bug so the integrity check can run normally.
+
+---
+
+### FIX 17: ListFiles / ListDirectories / ListFilesRecursive — IOException: Success on fresh install
+
+**Symptom:** Downloads fail immediately at ~2% with "Preparing", UI shows "Failed". Only reproducible on a clean profile — users who already have the per-mod `.downloading/<modId>/` folders from previous attempts don't see it.
+
+**Log evidence:**
+```
+[ERROR] [P06:04][ModsPatching.PrepareFolderForPatching][PerformDiskOperationAndCatch]
+System.IO.IOException: Success : 'C:\users\crossover\AppData\LocalLow\Colossal Order\
+  Cities Skylines II\.cache\Mods\pdx_mods\.downloading\143483_1'
+  at System.IO.Enumeration.FileSystemEnumerator`1[TResult].CreateDirectoryHandle (...)
+  at PDX.SDK.Internal.Util.IO.DiskIODefaultWindows.ListFiles (System.String path)
+```
+
+**Root cause:** `DiskIODefaultWindows.ListFiles` (and `ListDirectories`, `ListFilesRecursive`) is defined as:
+```csharp
+public List<string> ListFiles(string path) {
+    if (!PathExists(path)) return new List<string>();
+    if (IsLongPath(path)) return GetLongPathFiles(path);
+    return Directory.GetFiles(path).ToList();
+}
+```
+The `!PathExists` guard is meant to handle missing directories — but Wine's `PathExists` lies (returns `true` for non-existent paths, see FIX 4/5/13), so execution always falls through. When the actual `Directory.GetFiles(path)` is called on a non-existent directory, Wine's `GetFileAttributes` returns success with an invalid handle, and the .NET `FileSystemEnumerator` constructor throws `IOException` with the system error message for error code 0 (`"Success"`).
+
+**Fix:** Wrap each method's entire body in `try { ... } catch (IOException) { return new List<string>(); }`. Implementation rewrites the IL in place:
+1. Add a local variable `V_0` of the method's return type (`List<string>`).
+2. Mutate every existing `ret` to `stloc V_0; leave End` (mutated in place — preserves branch target references).
+3. Append the catch handler: `pop; newobj List<string>::.ctor(); stloc V_0; leave End`.
+4. Append the join point: `End: ldloc V_0; ret`.
+5. Register an `ExceptionHandler(Catch IOException)` covering `[firstInstr..catchPop)`.
+
+The `newobj List<string>::.ctor()` reference is reused from the original method body — the `!PathExists` early-return uses exactly that constructor, so we don't need to import a new method reference.
+
+Result for `ListFiles`:
+```il
+.try {
+    ldarg.0; ldarg.1; callvirt PathExists
+    brtrue.s Exists
+    newobj List<string>::.ctor()
+    stloc V_0; leave End
+
+  Exists:
+    ldarg.0; ldarg.1; call IsLongPath
+    brtrue.s LongPath
+    ldarg.1; call Directory::GetFiles
+    call Enumerable::ToList
+    stloc V_0; leave End
+
+  LongPath:
+    ldarg.0; ldarg.1; call GetLongPathFiles
+    stloc V_0; leave End
+}
+.catch IOException {
+    pop
+    newobj List<string>::.ctor()
+    stloc V_0; leave End
+}
+End:
+    ldloc V_0
+    ret
+```
+
+Why we keep the (useless) `PathExists` check: it costs nothing on Wine (always falls through) and remains correct on Windows where `PathExists` returns the real answer.
 
 ---
 
