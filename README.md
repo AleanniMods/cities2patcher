@@ -17,7 +17,7 @@ Supported target environment:
 - macOS on Apple Silicon
 - Steam version of Cities: Skylines II running inside CrossOver
 
-This is an unofficial community patcher. It is not affiliated with, endorsed by, or supported by Colossal Order, Paradox Interactive, CodeWeavers, Steam, or Apple.
+This is an unofficial community patcher. It is not affiliated with, endorsed by, or supported by Colossal Order, Iceflake Studios, Paradox Interactive, CodeWeavers, Steam, or Apple.
 
 Game updates can change the assemblies this tool patches. If the game updates, run the patcher again. It will detect already-patched files, skip patches that are no longer needed, and create backups before modifying files.
 
