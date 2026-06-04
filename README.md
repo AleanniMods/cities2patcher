@@ -1,6 +1,3 @@
-Here’s a cleaner README rewrite with support scope, safer claims, current modes, restore flow, and credits adjusted for `AleanniMods/cities2patcher`.
-
-```md
 # Cities: Skylines II macOS / Wine Patcher
 
 A community compatibility patcher for running **Cities: Skylines II** through **CrossOver/Wine on macOS**.
@@ -263,4 +260,4 @@ Current repository and maintenance:
 This tool modifies local game and mod DLLs. Backups are created automatically, but you should still use it at your own risk.
 
 If something breaks, use Restore mode or verify the game files through Steam.
-```
+
