@@ -1,123 +1,266 @@
-# Cities: Skylines 2 — macOS / Wine Patcher
+Here’s a cleaner README rewrite with support scope, safer claims, current modes, restore flow, and credits adjusted for `AleanniMods/cities2patcher`.
 
-Fixes crashes and enables Paradox Mods for **Cities: Skylines 2** running under CrossOver on macOS.
+```md
+# Cities: Skylines II macOS / Wine Patcher
 
-Tested: **CrossOver 26 · Game v1.5.8f1 · Apple Silicon (M3 Pro)**
+A community compatibility patcher for running **Cities: Skylines II** through **CrossOver/Wine on macOS**.
+
+This project patches selected managed assemblies to work around Wine-specific filesystem and platform behaviour that can prevent the game, Paradox Mods, or some code mods from loading correctly.
+
+GitHub: [AleanniMods/cities2patcher](https://github.com/AleanniMods/cities2patcher)
 
 ---
 
-## How to use
+## Support Status
 
-Open Terminal, paste this, press Enter:
+Supported target environment:
+
+- Cities: Skylines II `v1.5.10f1+`
+- CrossOver `26+`
+- macOS on Apple Silicon
+- Steam version of Cities: Skylines II running inside CrossOver
+
+This is an unofficial community patcher. It is not affiliated with, endorsed by, or supported by Colossal Order, Paradox Interactive, CodeWeavers, Steam, or Apple.
+
+Game updates can change the assemblies this tool patches. If the game updates, run the patcher again. It will detect already-patched files, skip patches that are no longer needed, and create backups before modifying files.
+
+---
+
+## Features
+
+### Core Compatibility Fixes
+
+Applies compatibility patches for Wine-specific issues that can cause:
+
+- Startup crashes
+- Asset loading failures
+- Mod loading failures
+- Broken file and directory operations
+- `IOException: Success` and related Wine filesystem errors
+
+### Paradox Mods Support
+
+Full patch mode applies additional fixes for Paradox Mods functionality, including download, install, lock, cancellation, and filesystem handling issues seen under Wine.
+
+### Mod Compatibility Patches
+
+Optional mod patching can patch supported community mod assemblies inside the Cities: Skylines II AppData folder.
+
+Currently supported mod patch targets include:
+
+- `ExtraAssetsImporter.dll`
+
+These patches are only applied when using the mod patch option.
+
+### Backups And Restore
+
+Before modifying a DLL, the patcher creates a `.bak` backup beside the original file.
+
+The restore option can restore backed-up game and mod DLLs without manually copying files.
+
+---
+
+## Installation
+
+Clone the repository and run the patcher:
 
 ```bash
-git clone https://github.com/alien-agent/cs2-macos-patcher && python3 cs2-macos-patcher/patch.py
+git clone https://github.com/AleanniMods/cities2patcher.git
+cd cities2patcher
+python3 patch.py
 ```
 
-The script will:
-
-1. Find your game automatically across all CrossOver bottles
-2. Ask you to choose Lightweight or Full patch
-3. Install dotnet via Homebrew automatically if needed (Full patch only)
-4. Apply the patches and back up original DLLs
-
-> **No dotnet?** No problem — the patcher installs it for you. You only
-> need [Homebrew](https://brew.sh).
-
-### After a game update
-
-Re-run the same command. The patcher detects already-patched files and skips them, then applies any
-new fixes to updated DLLs.
-
-### Can't find the game automatically?
+You can also pass the game Managed directory directly:
 
 ```bash
-python3 cs2-macos-patcher/patch.py "/path/to/Cities2_Data/Managed"
+python3 patch.py "/path/to/Cities2_Data/Managed"
 ```
 
-The Managed folder is typically inside your CrossOver bottle:
+---
 
+## Patch Modes
+
+When launched, the patcher offers these modes:
+
+### 1. Lightweight
+
+Patches the core game assemblies needed for game launch and asset loading.
+
+Targets:
+
+- `Colossal.IO.dll`
+- `Colossal.IO.AssetDatabase.dll`
+
+Recommended if you do not use Paradox Mods.
+
+### 2. Full Patch
+
+Applies all Lightweight patches plus Paradox Mods compatibility fixes.
+
+Targets:
+
+- `Colossal.IO.dll`
+- `Colossal.IO.AssetDatabase.dll`
+- `PDX.SDK.dll`
+
+Recommended for most players using Paradox Mods.
+
+### 3. Mod Files
+
+Patches supported mod assemblies inside the Cities: Skylines II AppData folder only.
+
+This does not patch the base game DLLs.
+
+You will be prompted for the Cities: Skylines II AppData folder, which is the folder containing:
+
+- `Player.log`
+- `Logs`
+- `ModsData`
+- `.cache`
+
+Example:
+
+```text
+~/Library/Application Support/CrossOver/Bottles/<bottle>/drive_c/users/crossover/AppData/LocalLow/Colossal Order/Cities Skylines II
 ```
-~/Library/Application Support/CrossOver/Bottles/<bottle-name>/drive_c/
-  Program Files (x86)/.../Cities2_Data/Managed
-```
 
-### Restoring original DLLs
+### 4. Restore
 
-The patcher prints exact restore commands at the end of each run. In general:
+Restores backed-up game and mod DLLs from `.bak` files.
+
+Use this before troubleshooting a clean state, after a failed patch, or before reporting an issue upstream.
+
+---
+
+## Direct Commands
+
+Full patch with known paths:
 
 ```bash
-cd "<path-to>/Cities2_Data/Managed"
-cp Colossal.IO.dll.bak Colossal.IO.dll
-cp Colossal.IO.AssetDatabase.dll.bak Colossal.IO.AssetDatabase.dll
-cp PDX.SDK.dll.bak PDX.SDK.dll          # Full patch only
+dotnet run --project cs2patcher -- \
+  "/path/to/Cities2_Data/Managed" \
+  full \
+  --apply
 ```
 
-Then re-run the patcher.
+Mod files only:
+
+```bash
+dotnet run --project cs2patcher -- \
+  "/path/to/Cities2_Data/Managed" \
+  mods \
+  --apply \
+  --appdata "/path/to/Cities Skylines II AppData"
+```
 
 ---
 
-## CrossOver settings for best performance
+## Dependencies
 
-My personal recommendation for best graphic/performance on Crossover 26:
+The patcher uses:
 
-| Setting                       | Value                | Notes                                                                                                                                                                                               |
-|-------------------------------|----------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Graphics**                  | **D3DMetal**         | CS2 uses DirectX 12. D3DMetal (from Apple Game Porting Toolkit) is the only translator that supports DX12 properly. DXVK and wined3d are slower or broken for DX12. DXMT is DX11-only — do not use. |
-| **Synchronization**           | **MSync**            | Mach semaphore-based sync. Confirmed better than ESync for CS2.                                                                                                                                     |
-| **DLSS (powered by MetalFX)** | **Enabled**          | New in CrossOver 26. Requires DLSS to also be enabled inside the game. Significant FPS gain on Apple Silicon.                                                                                       |
-| **High Resolution Mode**      | **On**               | Disables pixel doubling — correct behaviour on Retina displays.                                                                                                                                     |
-| **Windows version**           | **Windows 10 or 11** | Do not use XP or 7 — they break .NET runtime features the game relies on.                                                                                                                           |
-| **AVX**                       | **Enabled**          | CrossOver 25+ exposes AVX to the game via `ROSETTA_ADVERTISE_AVX=1`. Improves performance on Apple Silicon under Rosetta.                                                                           |
+- Python 3
+- .NET SDK / runtime for the C# IL patcher
+- Mono.Cecil for assembly rewriting
 
-> **macOS Tahoe (26)** gives the best Metal 4 support and full DLSS/MetalFX benefits. Under macOS
-> Sequoia (15.x) some Metal 4 features are unavailable.
+If `dotnet` is not found, the Python launcher can attempt to install the required .NET SDK through Homebrew.
 
 ---
 
-## In-game graphics settings
+## After A Game Update
 
-These settings make the biggest difference for performance inside CS2 itself.
+Run the patcher again:
 
-**Basic settings:**
+```bash
+python3 patch.py
+```
 
-| Setting                    | Value                                                                   | Notes                                                      |
-|----------------------------|-------------------------------------------------------------------------|------------------------------------------------------------|
-| **Display Mode**           | **Fullscreen Windowed**                                                 | Faster than Exclusive Fullscreen                           |
-| **Resolution**             | **1080p or 1440p**                                                      | Do not use native Retina resolution — it tanks performance |
-| **VSync**                  | **Disabled**                                                            |                                                            |
-| **Performance preference** | **Frame rate**                                                          |                                                            |
-| **Dynamic resolution**     | **DLSS Balanced** (if MetalFX enabled above), otherwise **FSR Quality** |                                                            |
-| **Depth of Field**         | **Disabled**                                                            | One of the heaviest effects in CS2                         |
-| **Motion Blur**            | **Disabled**                                                            | Nice perfomance boost for free                             |
+The patcher will:
 
----
-
-## Technical details
-
-For a full explanation of every Wine bug this patcher works around and how each fix works at the IL
-level, see [docs/technical.md](docs/technical.md).
+- Detect updated assemblies
+- Skip already-applied patches
+- Reapply required fixes
+- Create fresh backups where needed
 
 ---
 
-## Credits and prior work
+## Recommended CrossOver Settings
 
-This patcher builds
-on [alexqzd/cs2-crossover-patcher](https://github.com/alexqzd/cs2-crossover-patcher), which provided
-the foundation fixes for `Colossal.IO.dll`, `Colossal.IO.AssetDatabase.dll`, and the initial Paradox
-Mods patches.
+| Setting | Recommended Value |
+| --- | --- |
+| Graphics | D3DMetal |
+| Synchronization | MSync |
+| Windows Version | Windows 10 or 11 |
+| AVX | Enabled |
+| High Resolution Mode | Enabled |
 
-**What this patcher adds compared to alexqzd:**
+D3DMetal is currently the practical option for DirectX 12 games such as Cities: Skylines II under CrossOver.
 
-- **Paradox Mods support for v1.5.8f1+.** alexqzd's patcher stopped working after the v1.5.6+
-  updates. Two root-cause bugs were identified and fixed properly:
-    1. `FileIO.GetLockToken` — a Win32 waitable timer for a 10-second lock timeout fires in
-       milliseconds under Wine, cancelling every download before it starts.
-    2. `FileIO.<CreateFileStream>.MoveNext` — Wine's `File.Exists` returns `true` for non-existent
-       files, causing the code to acquire a reader lock, fail to open the file, and exit the
-       exception handler without releasing the lock. All subsequent write attempts for the same path
-       hang forever.
-- **Single-command setup** — `python3 patch.py` handles everything including dotnet installation.
-- **Auto-detection** of game across all CrossOver bottles.
-- **Lightweight / Full split** — game-launch fixes require no extra dependencies; Paradox Mods patch
-  installs dotnet automatically if needed.
+---
+
+## Recommended In-Game Settings
+
+| Setting | Recommended Value |
+| --- | --- |
+| Display Mode | Fullscreen Windowed |
+| Resolution | 1080p to 1440p |
+| VSync | Disabled |
+| Performance Preference | Frame Rate |
+| Dynamic Resolution | DLSS Balanced or FSR Quality |
+| Depth of Field | Disabled |
+| Motion Blur | Disabled |
+
+These settings are suggestions only. Performance depends heavily on Mac model, city size, mods, assets, and CrossOver version.
+
+---
+
+## Technical Documentation
+
+Detailed patch notes, root-cause analysis, and IL-level implementation details are documented in:
+
+```text
+docs/technical.md
+```
+
+---
+
+## Reporting Issues
+
+When reporting a problem, include:
+
+- Cities: Skylines II version
+- CrossOver version
+- macOS version
+- Mac model
+- Patch mode used
+- Whether restore was tested
+- `Player.log`
+- Relevant files from the `Logs` folder
+
+For mod patch issues, also include the affected mod name and the AppData path being used.
+
+---
+
+## Credits
+
+This project builds on prior community work to make Cities: Skylines II playable under CrossOver/Wine on macOS.
+
+Credits and thanks to:
+
+- [alexqzd/cs2-crossover-patcher](https://github.com/alexqzd/cs2-crossover-patcher) for the original CrossOver patching work and compatibility research.
+- [alien-agent/cs2-macos-patcher](https://github.com/alien-agent/cs2-macos-patcher) for the macOS patcher foundation and earlier implementation work.
+- The Cities: Skylines II modding community for documenting issues, testing fixes, and sharing logs.
+- CodeWeavers and Wine contributors for the compatibility layer that makes this possible.
+
+Current repository and maintenance:
+
+- [AleanniMods/cities2patcher](https://github.com/AleanniMods/cities2patcher)
+
+---
+
+## Disclaimer
+
+This tool modifies local game and mod DLLs. Backups are created automatically, but you should still use it at your own risk.
+
+If something breaks, use Restore mode or verify the game files through Steam.
+```
