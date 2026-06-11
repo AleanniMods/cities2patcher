@@ -70,7 +70,7 @@ static class PdxSdkPatcher
 
         // ---- FIX 2: Wrap BCL calls in try-catch(IOException) for short-path methods ----
         var fix2Targets = new[] {
-            ("Delete",          "System.IO.File",      "Delete"),
+            ("DeleteFile",      "System.IO.File",      "Delete"),
             ("DeleteDirectory", "System.IO.Directory", "Delete"),
             ("CreateDirectory", "System.IO.Directory", "CreateDirectory"),
             ("Move",            "System.IO.Directory", "Move"),
