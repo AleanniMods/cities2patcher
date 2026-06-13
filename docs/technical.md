@@ -18,6 +18,68 @@ All patches are applied to .NET assemblies using [Mono.Cecil](https://github.com
 
 ---
 
+### Bug: LongFile.Open throws IOException: Success on Wine long paths
+
+**Symptom:** The game opens, but settings/mod startup can fail with `System.IO.IOException: Success` while opening files through `System.IO.LongFile.Open`. When the file is opened through the regular .NET path APIs instead of the normalized `\\?\` long-path form, the same file can be read successfully.
+
+**Root cause:** `LongFile.Open` normalizes every path through `LongPath.NormalizeLongPath`, then calls `LongFile.GetFileHandle`. On Wine, the normalized `\\?\C:\...` path can fail in the Win32 `CreateFile` path while the failure still reports error code `0` (`"Success"`). The original implementation treats that as a real `IOException` and never attempts the equivalent non-`\\?\` path.
+
+**Fix:** Replace `LongFile.Open` with a helper that preserves the original behavior first, then falls back only for Wine's spurious `"Success"` IOException:
+
+```csharp
+var guid = Guid.NewGuid();
+
+try {
+    var normalizedPath = LongPath.NormalizeLongPath(path);
+    var handle = GetFileHandle(normalizedPath, guid, mode, access, share, options);
+    return new FileStreamWithHandle(handle, guid, access, bufferSize, async, disposeCallback);
+}
+catch (IOException ex) when (ex.Message.Contains("Success")) {
+    var fallbackPath = path.StartsWith(@"\\?\") ? path.Substring(4) : path;
+    return new FileStreamWithDisposeCallback(
+        fallbackPath, guid, mode, access, share, bufferSize, async, disposeCallback);
+}
+```
+
+Implementation detail: the fallback helper is injected into `System.IO.LongFile` as `__Cs2MacPatcher_OpenWineFallback`. The patcher also detects and replaces an older bad helper body that ended with a bare `nop`, because Mono rejected it at runtime with `InvalidProgramException`. The current helper ends with:
+
+```il
+ldnull
+ret
+```
+
+---
+
+### Bug: CreateFile returns invalid handle with LastError=0 for normalized paths
+
+**Symptom:** Long-path file opens can fail even before the fallback `FileStreamWithDisposeCallback` path is reached. The failure path shows an invalid file handle while `Marshal.GetLastWin32Error()` reports `0`.
+
+**Root cause:** `LongFile.GetFileHandle` calls the internal `NativeMethods.CreateFile` with the normalized `\\?\` path. Under Wine, this can return an invalid handle while leaving `LastError` at `0`. The surrounding .NET code interprets the invalid handle as a failure, but there is no useful Win32 error code to distinguish it from Wine's long-path prefix bug.
+
+**Fix:** Replace the direct `NativeMethods.CreateFile` call inside `LongFile.GetFileHandle` with an injected retry helper. The helper:
+
+1. Calls the original `CreateFile`.
+2. Captures `Marshal.GetLastWin32Error()`.
+3. If the handle is valid, returns it.
+4. If the handle is invalid and the error code is non-zero, returns it unchanged so the original error handling runs.
+5. If the handle is invalid, the error code is `0`, and the path starts with `\\?\`, retries once with the prefix stripped.
+
+Resulting behavior:
+
+```csharp
+var handle = CreateFile(path, ...);
+var error = Marshal.GetLastWin32Error();
+
+if (!handle.IsInvalid || error != 0 || !path.StartsWith(@"\\?\"))
+    return handle;
+
+return CreateFile(path.Substring(4), ...);
+```
+
+This stays narrow: it only changes Wine's invalid-handle/`LastError=0` case and leaves real Win32 failures on the original path.
+
+---
+
 ## Colossal.IO.AssetDatabase.dll — Asset loading crash
 
 ### Bug: File.Exists returns true for non-existent files
@@ -40,7 +102,7 @@ All patches are applied to .NET assemblies using [Mono.Cecil](https://github.com
 
 `DiskIODefaultWindows` wraps Win32 file operations. Under Wine:
 - `DeleteLongPathFile`, `DeleteLongPathDirectory`, `CreateLongPathDirectory`, `LongPathMove` throw `IOException` even when the operation succeeded — NOP'd.
-- Short-path equivalents (`Delete`, `DeleteDirectory`, `CreateDirectory`, `Move`) receive spurious `IOException`s from the BCL — wrapped in try-catch that swallows them.
+- Short-path equivalents (`DeleteFile`, `DeleteDirectory`, `CreateDirectory`, `Move`) receive spurious `IOException`s from the BCL — wrapped in try-catch that swallows them.
 - `CreateLongPathDirectory` and `CreateDirectory` call `PathExists` before creating, which returns `true` for non-existent paths under Wine — the early-exit branch is NOP'd.
 
 ### FIX 5: CreateWriteStream — always create parent directory

@@ -1,25 +1,19 @@
-# Cities: Skylines II macOS / Wine Patcher
+# Cities: Skylines 2 — macOS / Wine Patcher
 
-A community compatibility patcher for running **Cities: Skylines II** through **CrossOver/Wine on macOS**.
+A compatibility patcher for **Cities: Skylines 2** running under CrossOver/Wine on macOS.
 
-This project patches selected managed assemblies to work around Wine-specific filesystem and platform behaviour that can prevent the game, Paradox Mods, or some code mods from loading correctly.
+The patcher targets Wine-specific filesystem and platform behaviour that can otherwise cause startup crashes, asset loading failures, and broken Paradox Mods downloads.
 
-GitHub: [AleanniMods/cities2patcher](https://github.com/AleanniMods/cities2patcher)
+Repository: [AleanniMods/cities2patcher](https://github.com/AleanniMods/cities2patcher)
 
 ---
 
-## Support Status
+## Supported Environment
 
-Supported target environment:
-
-- Cities: Skylines II `v1.5.10f1+`
-- CrossOver `26+`
-- macOS on Apple Silicon
-- Steam version of Cities: Skylines II running inside CrossOver
-
-This is an unofficial community patcher. It is not affiliated with, endorsed by, or supported by Colossal Order, Iceflake Studios, Paradox Interactive, CodeWeavers, Steam, or Apple.
-
-Game updates can change the assemblies this tool patches. If the game updates, run the patcher again. It will detect already-patched files, skip patches that are no longer needed, and create backups before modifying files.
+- Cities: Skylines 2 v1.5.8f1+
+- CrossOver 26+
+- Apple Silicon Macs
+- Steam Windows build running through CrossOver/Wine
 
 ---
 
@@ -27,237 +21,162 @@ Game updates can change the assemblies this tool patches. If the game updates, r
 
 ### Core Compatibility Fixes
 
-Applies compatibility patches for Wine-specific issues that can cause:
+Patches known Wine-specific issues in the game assemblies that can cause:
 
 - Startup crashes
 - Asset loading failures
-- Mod loading failures
-- Broken file and directory operations
-- `IOException: Success` and related Wine filesystem errors
+- Long-path file open failures
+- Broken filesystem checks
+- Stability issues during startup and gameplay
 
 ### Paradox Mods Support
 
-Full patch mode applies additional fixes for Paradox Mods functionality, including download, install, lock, cancellation, and filesystem handling issues seen under Wine.
+Full mode patches Wine-specific issues in `PDX.SDK.dll` that can prevent Paradox Mods downloads, installs, and file operations from completing correctly.
 
-### Mod Compatibility Patches
+### ExtraAssetsImporter Note
 
-Optional mod patching can patch supported community mod assemblies inside the Cities: Skylines II AppData folder.
+This patcher does not patch ExtraAssetsImporter or convert ExtraAssetsImporter assets.
 
-Currently supported mod patch targets include:
+If you use ExtraAssetsImporter under CrossOver/Wine, you may still need to delete the generated `ModsData/ExtraAssetsImporter` folder before starting the game. Some ExtraAssetsImporter database/cache files can trigger Wine filesystem errors on relaunch, and removing that generated folder lets the mod rebuild it cleanly.
 
-- `ExtraAssetsImporter.dll`
+### Automatic Detection
 
-These patches are only applied when using the mod patch option.
+The patcher automatically:
 
-### Backups And Restore
-
-Before modifying a DLL, the patcher creates a `.bak` backup beside the original file.
-
-The restore option can restore backed-up game and mod DLLs without manually copying files.
+- Finds Cities: Skylines 2 across CrossOver bottles
+- Detects already-patched files
+- Creates `.bak` backups before modification
+- Applies only required fixes
 
 ---
 
 ## Installation
 
-Clone the repository and run the patcher:
+Open Terminal, paste the following command, then press Enter:
 
 ```bash
-git clone https://github.com/AleanniMods/cities2patcher.git
-cd cities2patcher
-python3 patch.py
+git clone https://github.com/AleanniMods/cities2patcher && python3 cities2patcher/patch.py
 ```
 
-You can also pass the game Managed directory directly:
+The patcher will:
 
-```bash
-python3 patch.py "/path/to/Cities2_Data/Managed"
-```
+1. Locate your Cities: Skylines 2 installation.
+2. Ask whether to apply Lightweight or Full mode.
+3. Install the .NET SDK through Homebrew if `dotnet` is missing.
+4. Back up original DLLs.
+5. Apply the selected patches.
+
+> The current patcher runs a small C# patching tool, so `dotnet` is required for both modes. If Homebrew is installed, the launcher can install it automatically.
 
 ---
 
 ## Patch Modes
 
-When launched, the patcher offers these modes:
+### Lightweight
 
-### 1. Lightweight
+Applies game-launch, asset-loading, and core filesystem compatibility fixes.
 
-Patches the core game assemblies needed for game launch and asset loading.
-
-Targets:
+This mode patches:
 
 - `Colossal.IO.dll`
 - `Colossal.IO.AssetDatabase.dll`
 
-Recommended if you do not use Paradox Mods.
+### Full
 
-### 2. Full Patch
+Applies all Lightweight fixes plus Paradox Mods fixes.
 
-Applies all Lightweight patches plus Paradox Mods compatibility fixes.
+This mode additionally patches:
 
-Targets:
-
-- `Colossal.IO.dll`
-- `Colossal.IO.AssetDatabase.dll`
 - `PDX.SDK.dll`
 
-Recommended for most players using Paradox Mods.
-
-### 3. Mod Files
-
-Patches supported mod assemblies inside the Cities: Skylines II AppData folder only.
-
-This does not patch the base game DLLs.
-
-You will be prompted for the Cities: Skylines II AppData folder, which is the folder containing:
-
-- `Player.log`
-- `Logs`
-- `ModsData`
-- `.cache`
-
-Example:
-
-```text
-~/Library/Application Support/CrossOver/Bottles/<bottle>/drive_c/users/crossover/AppData/LocalLow/Colossal Order/Cities Skylines II
-```
-
-### 4. Restore
-
-Restores backed-up game and mod DLLs from `.bak` files.
-
-Use this before troubleshooting a clean state, after a failed patch, or before reporting an issue upstream.
+Recommended if you use the in-game Paradox Mods browser or need Paradox Mods downloads to work reliably.
 
 ---
 
-## Direct Commands
-
-Full patch with known paths:
-
-```bash
-dotnet run --project cs2patcher -- \
-  "/path/to/Cities2_Data/Managed" \
-  full \
-  --apply
-```
-
-Mod files only:
-
-```bash
-dotnet run --project cs2patcher -- \
-  "/path/to/Cities2_Data/Managed" \
-  mods \
-  --apply \
-  --appdata "/path/to/Cities Skylines II AppData"
-```
-
----
-
-## Dependencies
-
-The patcher uses:
-
-- Python 3
-- .NET SDK / runtime for the C# IL patcher
-- Mono.Cecil for assembly rewriting
-
-If `dotnet` is not found, the Python launcher can attempt to install the required .NET SDK through Homebrew.
-
----
-
-## After A Game Update
+## After a Game Update
 
 Run the patcher again:
 
 ```bash
-python3 patch.py
+python3 cities2patcher/patch.py
 ```
 
-The patcher will:
+The patcher will detect updated assemblies, skip unchanged patches, and reapply fixes where needed.
 
-- Detect updated assemblies
-- Skip already-applied patches
-- Reapply required fixes
-- Create fresh backups where needed
+---
+
+## Manual Game Location
+
+If automatic detection fails, pass the Managed directory directly:
+
+```bash
+python3 cities2patcher/patch.py "/path/to/Cities2_Data/Managed"
+```
+
+Typical CrossOver location:
+
+```text
+~/Library/Application Support/CrossOver/Bottles/<bottle-name>/drive_c/
+  Program Files (x86)/Steam/steamapps/common/Cities Skylines II/Cities2_Data/Managed
+```
+
+---
+
+## Restoring Original DLLs
+
+Backups are stored beside the patched DLLs with a `.bak` suffix.
+
+To restore manually:
+
+```bash
+cd "<path-to>/Cities2_Data/Managed"
+cp Colossal.IO.dll.bak Colossal.IO.dll
+cp Colossal.IO.AssetDatabase.dll.bak Colossal.IO.AssetDatabase.dll
+cp PDX.SDK.dll.bak PDX.SDK.dll
+```
+
+Only restore `PDX.SDK.dll` if Full mode was applied.
 
 ---
 
 ## Recommended CrossOver Settings
 
-| Setting | Recommended Value |
-| --- | --- |
-| Graphics | D3DMetal |
-| Synchronization | MSync |
-| Windows Version | Windows 10 or 11 |
-| AVX | Enabled |
-| High Resolution Mode | Enabled |
-
-D3DMetal is currently the practical option for DirectX 12 games such as Cities: Skylines II under CrossOver.
+| Setting | Recommended Value | Notes |
+|---|---|---|
+| Graphics | D3DMetal | Required for practical DirectX 12 support. |
+| Synchronization | MSync | Usually better than ESync for this game. |
+| DLSS / MetalFX | Enabled | Enable DLSS in-game as well. |
+| High Resolution Mode | Enabled | Avoids Retina pixel-doubling issues. |
+| Windows Version | Windows 10 or 11 | Older Windows modes can break required runtime features. |
+| AVX | Enabled | CrossOver 25+ can expose AVX through Rosetta. |
 
 ---
 
 ## Recommended In-Game Settings
 
 | Setting | Recommended Value |
-| --- | --- |
+|---|---|
 | Display Mode | Fullscreen Windowed |
-| Resolution | 1080p to 1440p |
+| Resolution | 1080p-1440p |
 | VSync | Disabled |
 | Performance Preference | Frame Rate |
 | Dynamic Resolution | DLSS Balanced or FSR Quality |
 | Depth of Field | Disabled |
 | Motion Blur | Disabled |
 
-These settings are suggestions only. Performance depends heavily on Mac model, city size, mods, assets, and CrossOver version.
-
 ---
 
 ## Technical Documentation
 
-Detailed patch notes, root-cause analysis, and IL-level implementation details are documented in:
-
-```text
-docs/technical.md
-```
-
----
-
-## Reporting Issues
-
-When reporting a problem, include:
-
-- Cities: Skylines II version
-- CrossOver version
-- macOS version
-- Mac model
-- Patch mode used
-- Whether restore was tested
-- `Player.log`
-- Relevant files from the `Logs` folder
-
-For mod patch issues, also include the affected mod name and the AppData path being used.
+For detailed root-cause analysis and IL-level implementation notes, see [docs/technical.md](docs/technical.md).
 
 ---
 
 ## Credits
 
-This project builds on prior community work to make Cities: Skylines II playable under CrossOver/Wine on macOS.
+This project builds on prior Cities: Skylines 2 CrossOver patching work, including:
 
-Credits and thanks to:
+- [alexqzd/cs2-crossover-patcher](https://github.com/alexqzd/cs2-crossover-patcher)
+- [alien-agent/cs2-macos-patcher](https://github.com/alien-agent/cs2-macos-patcher)
 
-- [alexqzd/cs2-crossover-patcher](https://github.com/alexqzd/cs2-crossover-patcher) for the original CrossOver patching work and compatibility research.
-- [alien-agent/cs2-macos-patcher](https://github.com/alien-agent/cs2-macos-patcher) for the macOS patcher foundation and earlier implementation work.
-- The Cities: Skylines II modding community for documenting issues, testing fixes, and sharing logs.
-- CodeWeavers and Wine contributors for the compatibility layer that makes this possible.
-
-Current repository and maintenance:
-
-- [AleanniMods/cities2patcher](https://github.com/AleanniMods/cities2patcher)
-
----
-
-## Disclaimer
-
-This tool modifies local game and mod DLLs. Backups are created automatically, but you should still use it at your own risk.
-
-If something breaks, use Restore mode or verify the game files through Steam.
-
+Current repository: [AleanniMods/cities2patcher](https://github.com/AleanniMods/cities2patcher)
